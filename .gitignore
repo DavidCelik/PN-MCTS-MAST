@@ -7,3 +7,36 @@
 *.iml
 /ludii.trl
 /ludii_preferences.json
+# --- Specific File Exclusions ---
+src/experiments/RunPNSMCTSComparison.java
+
+# --- User Results (Don't upload these) ---
+results/
+test-results/
+logs/
+
+# --- Compiled Java Output ---
+/out/
+/bin/
+*.class
+
+# --- IntelliJ IDE ---
+/.idea/
+*.iml
+/shelf/
+/workspace.xml
+/mavenHomeManager.xml
+
+# --- Eclipse IDE ---
+/.classpath
+/.project
+/.settings/
+
+# --- Ludii & Project Config ---
+/ludii.trl
+/ludii_preferences.json
+/.README.md.html
+
+# --- OS System Files ---
+.DS_Store
+Thumbs.db

@@ -7,12 +7,10 @@ import other.RankUtils;
 import other.context.Context;
 import other.move.Move;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
-public class PNSMCTS_L2 extends AI {
+public class PNSMCTS_L2_RAVE extends AI {
 
 
     public static boolean FIN_MOVE_SEL = true;
@@ -28,7 +26,6 @@ public class PNSMCTS_L2 extends AI {
     protected int player = -1;
 
     /**
-     * Settings contain (in order): pnConstant, explorationConstant, time per turn
      */
     private static double[] settings;
 
@@ -36,36 +33,33 @@ public class PNSMCTS_L2 extends AI {
     private static double sims = 0;
     private static double simsThisTurn = 0;
     private static double turns = 0;
-
-    //-------------------------------------------------------------------------
-
-    //-----------david---------------------------
+    
     /**
      * @return The number of simulations performed in the current turn
      */
     public double getSimsThisTurn() {
         return simsThisTurn;
     }
-    //-----------david---------------------------
+
     /**
      * Constructor
      */
-    public PNSMCTS_L2() {
-        this.friendlyName = "PNS_L2 UCT";
+    public PNSMCTS_L2_RAVE() {
+        this.friendlyName = "PNS_L2_RAVE";
         double[] defaultSettings = {1.0, Math.sqrt(2), 1.0}; // PN-Constant, MCTS-Constant, Time per turn
         this.settings = defaultSettings;
     }
 
-    public PNSMCTS_L2(double[] settings) {
-        this.friendlyName = "PNS_L2 UCT";
+    public PNSMCTS_L2_RAVE(double[] settings) {
+        this.friendlyName = "PNS_L2_RAVE";
         this.settings = settings;
     }
 
-    public PNSMCTS_L2(boolean finMove, int minVisits, double pnCons, double contemptFactor) {
+    public PNSMCTS_L2_RAVE(boolean finMove, int minVisits, double pnCons, double contemptFactor) {
         this.FIN_MOVE_SEL = finMove;
         this.SOLVERLIKE_MINVISITS = minVisits;
         this.CONTEMPT_FACTOR = contemptFactor; // applies only if FIN_MOVE_SEL is true
-        this.friendlyName = "PNS_L2 UCT";
+        this.friendlyName = "PNS_L2_RAVE";
         double[] defaultSettings = {pnCons, Math.sqrt(2), 1.0}; // PN-Constant, MCTS-Constant, Time per turn
         this.settings = defaultSettings;
         this.counter = 0;
@@ -75,9 +69,6 @@ public class PNSMCTS_L2 extends AI {
         counter = 0;
     }
 
-
-    //-------------------------------------------------------------------------
-
     @Override
     public Move selectAction(
             final Game game,
@@ -86,8 +77,6 @@ public class PNSMCTS_L2 extends AI {
             final int maxIterations,
             final int maxDepth
     ) {
-//        this.simsThisTurn = this.sims;
-//        this.turns++;
         simsThisTurn = 0;
         turns++;
         // Start out by creating a new root node (no tree reuse in this example)
@@ -124,20 +113,37 @@ public class PNSMCTS_L2 extends AI {
             }
 
             Context contextEnd = current.context;
+            // Store the simulation moves
+            FastArrayList<Move> movesInSimulation = new FastArrayList<>();
 
             if (!contextEnd.trial().over()) {
                 // Run a playout if we don't already have a terminal game state in node
                 contextEnd = new Context(contextEnd);
-                game.playout
-                        (
-                                contextEnd,
-                                null,
-                                -1.0,
-                                null,
-                                0,
-                                -1,
-                                ThreadLocalRandom.current()
-                        );
+//                game.playout
+//                        (
+//                                contextEnd,
+//                                null,
+//                                -1.0,
+//                                null,
+//                                0,
+//                                -1,
+//                                ThreadLocalRandom.current()
+//                        );
+
+                // Run the playout and track moves
+                while (!contextEnd.trial().over()) {
+                    FastArrayList<Move> legalMoves = contextEnd.game().moves(contextEnd).moves();
+                    if (legalMoves.isEmpty()) {
+                        // Handle case with no legal moves
+                        Move defaultMove = contextEnd.game().moves(contextEnd).moves().get(0);
+                        contextEnd.game().apply(contextEnd, defaultMove);
+                    } else {
+                        // Select a random move
+                        Move move = legalMoves.get(ThreadLocalRandom.current().nextInt(legalMoves.size()));
+                        movesInSimulation.add(move);  // Track the move
+                        contextEnd.game().apply(contextEnd, move);
+                    }
+                }
                 sims++;
                 simsThisTurn++;
             }
@@ -150,10 +156,25 @@ public class PNSMCTS_L2 extends AI {
             boolean changed = true;
             boolean firstNode = true;
             while (current != null) {
-                current.visitCount += 1;
+                //current.visitCount += 1;
+                current.incrementVisitCount();
                 for (int p = 1; p <= game.players().count(); ++p) {
-                    current.scoreSums[p] += utilities[p];
+                    //--------------bound check start---------------------
+                    if (p < current.scoreSums.length) {
+                        current.scoreSums[p] += utilities[p];
+                    } else {
+                        System.err.println("Warning: Player index " + p + " out of bounds for scoreSums of length " + current.scoreSums.length);
+                    }
+                    //--------------bound check end--------------------- 
                 }
+                // RAVE updates
+                //--------------bound check start---------------------
+                if (player >= 0 && player < utilities.length) {
+                    updateRaveStats(current, movesInSimulation, utilities[player]);
+                } else {
+                    System.err.println("Warning: Player index " + player + " out of bounds for utilities of length " + utilities.length);
+                }
+                //--------------bound check end--------------------- 
                 if (!firstNode) {
                     if (changed) {
                         changed = current.setProofAndDisproofNumbers();
@@ -224,7 +245,6 @@ public class PNSMCTS_L2 extends AI {
 //            if (child.proofNum == 0 && child.proofNumL2 != 0) System.err.println("L1 proof 0 but L2 not!!!");
 //            if (child.disproofNumL2 == 0 && child.disproofNum != 0) System.err.println("L2 disproof 0 but L1 not!!!");
 
-
             // original solver
 //            if (current.proofNum != 0 && current.disproofNum != 0) {
 //                if (child.proofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue;
@@ -237,8 +257,9 @@ public class PNSMCTS_L2 extends AI {
                 if (child.disproofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue; // lose or draw
             }
 
-            final double exploit = child.scoreSums[mover] / child.visitCount;
-            final double explore = Math.sqrt((Math.log(current.visitCount)) / child.visitCount); //UCT with changeable exploration constant
+            //final double exploit = child.scoreSums[mover] / child.visitCount;
+            final double exploit = calculateRaveValue(current,child,RAVE_K);
+            final double explore = Math.sqrt((Math.log(current.visitCount)) / child.visitCount);//UCT with changeable exploration constant
             final double pnEffect = 1 - (child.getRank() / total); // This formula assures that the node with lowest rank (best node) has the highest pnEffect
 
             // UCT-PN Formula
@@ -287,7 +308,6 @@ public class PNSMCTS_L2 extends AI {
 
         // To ensure a proven node will select the proven child too
         if (FIN_MOVE_SEL) {
-            //System.out.println("XXXXXXX");
             if (rootNode.proofNum == 0) {
                 for (Node child : rootNode.children) {
                     if (child.proofNum == 0) {
@@ -296,12 +316,17 @@ public class PNSMCTS_L2 extends AI {
                     }
                 }
             } else if (rootNode.proofNumL2 == 0) { // Level 2 check
-                double rootscore = rootNode.scoreSums[rootNode.context.state().mover()] / rootNode.visitCount;
-                //System.out.println("Can prove draw (not win), root score " + rootscore);
+                int mover = rootNode.context.state().mover();
+                double rootscore = 0.0;
+                //--------------bound check start---------------------
+                if (mover >= 0 && mover < rootNode.scoreSums.length) {
+                    rootscore = rootNode.scoreSums[mover] / rootNode.visitCount;
+                } else {
+                    System.err.println("Warning: Mover index " + mover + " out of bounds for scoreSums of length " + rootNode.scoreSums.length);
+                }
+                //--------------bound check end--------------------- 
                 if (rootscore <= CONTEMPT_FACTOR) {
                     ++counter;
-                    // uncomment line below for verbose!
-                    //System.out.println("FinMoveSel proven DRAW, rootscore: " + rootscore);
                     for (Node child : rootNode.children) {
                         if (child.proofNumL2 == 0) {
                             bestChild = child;
@@ -310,7 +335,6 @@ public class PNSMCTS_L2 extends AI {
                     }
                 }
             }
-            //System.out.println("rootscore: " + rootNode.scoreSums[rootNode.context.state().mover()] / rootNode.visitCount);
         }
 
         return bestChild.moveFromParent;
@@ -319,6 +343,7 @@ public class PNSMCTS_L2 extends AI {
     @Override
     public void initAI(final Game game, final int playerID) {
         this.player = playerID;
+        // No need to reset stats here since each node has its own stats
     }
 
     @Override
@@ -333,27 +358,161 @@ public class PNSMCTS_L2 extends AI {
         return true;
     }
 
-    //-------------------------------------------------------------------------
+    //---------------------------RAVE start-----------------------------------------------------------------------------------
+
+    // RAVE-specific parameters
+    protected static double RAVE_K = 1000.0;  // Equivalence parameter for RAVE
+
+    private static final int REF_VISITS = 50; // Threshold for reliable AMAF
+
+    // Node-specific RAVE statistics (Q(s,a))
+    public static class NodeRaveStats {
+        int visits = 0;              // N(s,a) - visits to this move in this node
+        double totalScore = 0.0;     // Q(s,a) * N(s,a) - total score from this move in this node
+    }
+    
+    // AMAF statistics for a node
+    public static class NodeAmafStats {
+        private final Map<Move, MoveAmafStats> moveStats = new HashMap<>();
+        
+        public static class MoveAmafStats {
+            int visits = 0;          // AMAF visits for this move
+            double totalScore = 0.0; // AMAF(s,a) * N_AMAF(s,a)
+        }
+        
+        public void update(Move move, double result) {
+            MoveAmafStats stats = moveStats.computeIfAbsent(move, k -> new MoveAmafStats());
+            stats.visits++;
+            stats.totalScore += result;
+        }
+        
+        public double getAmafValue(Move move) {
+            MoveAmafStats stats = moveStats.get(move);
+            return (stats != null && stats.visits > 0) ? (stats.totalScore / stats.visits) : 0.0;
+        }
+        
+        public int getAmafVisits(Move move) {
+            MoveAmafStats stats = moveStats.get(move);
+            return (stats != null) ? stats.visits : 0;
+        }
+        public double averageAmafValue() {
+            if (moveStats.isEmpty()) {
+                return 0.0;
+            }
+
+            double total = 0.0;
+            int count = 0;
+
+            for (Map.Entry<Move, MoveAmafStats> entry : moveStats.entrySet()) {
+                MoveAmafStats stat = entry.getValue();
+                if (stat.visits > 0) {
+                    total += (double) stat.totalScore / stat.visits;
+                    count++;
+                }
+            }
+
+            return count > 0 ? total / count : 0.0;
+        }
+    }
+
+
 
     /**
-     * Inner class for nodes used by example UCT
-     *
-     * @author Dennis Soemers
+     * Calculate the RAVE value for a given move
+     * @param node
+     * @return
+     */
+    // Method to calculate RAVE value
+    protected static double calculateRaveValue(Node node,Node child, double raveK) {
+        // Standard node value
+        double standardValue = 0.0;
+        if (node.visitCount > 0) {
+            int player = node.context.state().mover();
+            //--------------bound check start---------------------
+            if (player >= 0 && player < node.scoreSums.length) {
+                standardValue = node.scoreSums[player] / node.visitCount;
+            } else {
+                System.err.println("Warning: Invalid player index " + player + " for scoreSums of length " + node.scoreSums.length);
+            }
+            //--------------bound check end--------------------- 
+        }
+
+        // Get GRAVE AMAF value
+        double amaf = node.getGraveAmafValue(child.moveFromParent);
+
+
+        // If no AMAF data, return standard value
+//        if (amaf == 0.0) {
+//            return standardValue;
+//        }
+
+        // Weight for combining standard and AMAF values
+        double beta = Math.sqrt(raveK / (3 * node.visitCount + raveK));
+
+        // Combine the values
+        return (1.0 - beta) * standardValue + beta * amaf;
+    }
+
+    // Method to update RAVE statistics
+    protected void updateRaveStats(Node node, FastArrayList<Move> movesInSimulation, double result) {
+
+        // We can directly use the moves from this node's position in the simulation
+        for (int i = 0; i < movesInSimulation.size(); i++) {
+            Move move = movesInSimulation.get(i);
+            //if (isMoveLegal(move, legalMoves)) {
+                //System.out.println("yes move: " + move + "is legal for node: " + node);
+                node.amafStats.update(move, result);
+            //}
+        }
+
+        // Update node-specific stats for the move actually taken from this node
+        if (node.moveFromParent != null) {
+                NodeRaveStats nodeStats = node.nodeRaveStats.computeIfAbsent(
+                        node.moveFromParent,
+                        k -> new NodeRaveStats()
+                );
+                nodeStats.visits++;
+                nodeStats.totalScore += result;
+
+        }
+    }
+
+    private static boolean isMoveLegal(Move move, FastArrayList<Move> legalMoves) {
+        // Check if the move is in the list of legal moves
+        for (int i = 0; i < legalMoves.size(); i++) {
+            if (legalMoves.get(i).equals(move)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    //-----------------------------------RAVE end-----------------------------------------------------------------------------
+
+    /**
+     * Inner class for nodes used by PNSMCTS_L2_RAVE
      */
     private static class Node implements Comparable<Node> {
+        // Q(s,a) statistics for this node
+        private final Map<Move, NodeRaveStats> nodeRaveStats = new HashMap<>();
+        
+        // AMAF statistics for this node
+        private final NodeAmafStats amafStats = new NodeAmafStats();
+
+        private Node graveAncestor = null;  // Cached reliable ancestor
 
         /**
          * Our parent node
          */
         private final Node parent;
-
+        
         /**
          * The move that led from parent to this node
          */
         private final Move moveFromParent;
 
         /**
-         * This objects contains the game state for this node (this is why we don't support stochastic games)
+         * This objects contains the game state for this node
          */
         private final Context context;
 
@@ -396,22 +555,10 @@ public class PNSMCTS_L2 extends AI {
         private double proofNumL2;
         private double disproofNumL2;
 
-        // tutaj dodać i w 393: public void evaluate() dodać obsługę nowych z różnicą zachowania w przypadku remisu >= 0.5 zamiast == 1.0
-        // zmienić compareTo(Node), zmienić to w: PNSMCTS_Extension2
-
-        /**
-         * Rank of a node compared to "siblings". Needed for UCT-PN. Ranks ordered best to worst
-         */
-        private int rank;
-
-        /**
-         * Various necessary information variables.
-         */
-        private final PNSNodeTypes type;
-
+        private PNSNodeTypes type;
         private PNSNodeValues value;
-
-        public final int proofPlayer;
+        private final int proofPlayer;
+        private int rank;
 
         public enum PNSNodeTypes {
             /**
@@ -440,7 +587,7 @@ public class PNSMCTS_L2 extends AI {
             FALSE,
 
             /**
-             * A disproven node
+             * A drawn node
              */
             DRAW,
 
@@ -450,15 +597,21 @@ public class PNSMCTS_L2 extends AI {
             UNKNOWN
         }
 
-
         /**
          * Constructor
-         *
-         * @param parent
-         * @param moveFromParent
-         * @param context
          */
         public Node(final Node parent, final Move moveFromParent, final Context context, final int proofPlayer) {
+
+            if (context == null) {
+                throw new IllegalArgumentException("Context cannot be null");
+            }
+            if (context.game() == null) {
+                throw new IllegalStateException("Game in context is null");
+            }
+            if (context.state() == null) {
+                throw new IllegalStateException("State in context is null");
+            }
+
             this.parent = parent;
             this.moveFromParent = moveFromParent;
             this.context = context;
@@ -482,6 +635,76 @@ public class PNSMCTS_L2 extends AI {
                 parent.children.add(this);
         }
 
+        //---------------------------------------------------------GRAVE start------------------------------------------
+        /**
+         * Get GRAVE AMAF value for a move
+         * @param move The move to get AMAF value for
+         * @return AMAF value from this node or nearest reliable ancestor
+         */
+        public double getGraveAmafValue(Move move) {
+            // Get the reliable ancestor's AMAF value for this move
+            if(visitCount <= REF_VISITS && REF_VISITS != 0){
+                Node reliableNode = getGraveAncestor();
+                if (reliableNode != null) {
+                    return reliableNode.amafStats.getAmafValue(move);
+                }
+            }
+
+            // Fall back to current node's AMAF if no reliable ancestor
+            return amafStats.getAmafValue(move);
+        }
+
+        public void incrementVisitCount() {
+            this.visitCount++;
+
+            // When we cross the threshold, update this node and descendants
+            if (this.visitCount == REF_VISITS + 1 && REF_VISITS != 0) {
+                //System.out.println("I " + this + " am reliable");
+                // This node is reliable, so it can be an ancestor
+                this.graveAncestor = this;
+                this.updateGraveAncestorsInSubtree(this);
+            }
+        }
+
+        private void updateGraveAncestorsInSubtree(Node ancestor) {
+
+            if (this.visitCount <= 0) {
+               // System.out.println("i am " + this + " my ancesstor was: " + this.graveAncestor + " now its: " + ancestor);
+                //this.graveAncestor = ancestor;
+               // System.out.println("i am not real");
+                return;
+            }
+
+            for(Node child : this.children){
+                if(child != null && child.visitCount < REF_VISITS){
+                    //System.out.println("i am " + child + " my ancesstor was: " + child.graveAncestor + " now its: " + ancestor);
+                    child.graveAncestor = ancestor;
+                    child.updateGraveAncestorsInSubtree(ancestor);
+                }
+            }
+        }
+
+        // get the GRAVE ancestor
+        public Node getGraveAncestor() {
+            // If we already found our ancestor, return it
+            if (graveAncestor != null) {
+                return graveAncestor;
+            }
+
+            // Otherwise, find the closest reliable ancestor
+            Node ancestor = parent;
+            while (ancestor != null) {
+                if (ancestor.visitCount > REF_VISITS) {
+                    graveAncestor = ancestor;  // Cache the result
+                    return ancestor;
+                }
+                ancestor = ancestor.parent;
+            }
+            return null;
+        }
+
+        //--------------------------------------------------------------GRAVE end------------------------------------------
+
         /**
          * Evaluates a node as in PNS according to L. V. Allis' "Searching for Solutions in Games and Artificial Intelligence"
          */
@@ -498,7 +721,6 @@ public class PNSMCTS_L2 extends AI {
                 this.value = PNSNodeValues.UNKNOWN;
             }
         }
-
 
         /**
          * Sets the proof and disproof values of the current node as it is done for PNS in L. V. Allis' "Searching for
@@ -615,10 +837,6 @@ public class PNSMCTS_L2 extends AI {
             }
         }
 
-        /**
-         * Set an ordered ranking for the UCT-PN formula in the selection step of MCTS
-         */
-
         public void setChildRanks() {
             List<Node> sorted = new ArrayList<Node>(this.children);
             Collections.sort(sorted);
@@ -639,35 +857,35 @@ public class PNSMCTS_L2 extends AI {
         }
 
         public List<Node> getChildren() {
-            return children;
+            return this.children;
         }
 
         public double getProofNum() {
-            return proofNum;
+            return this.proofNum;
         }
 
         public double getProofNumL2() {
-            return proofNumL2;
+            return this.proofNumL2;
         }
 
         public double getDisproofNum() {
-            return disproofNum;
+            return this.disproofNum;
         }
 
         public double getDisproofNumL2() {
-            return disproofNumL2;
+            return this.disproofNumL2;
         }
 
         public PNSNodeTypes getType() {
-            return type;
+            return this.type;
         }
 
         public int getRank() {
-            return rank;
+            return this.rank;
         }
 
         public List<Node> getUnexpandedChildren() {
-            return unexpandedChildren;
+            return this.unexpandedChildren;
         }
 
         public void setRank(int rank) {
@@ -705,8 +923,4 @@ public class PNSMCTS_L2 extends AI {
             return 0;
         }
     }
-
-    //-------------------------------------------------------------------------
-
-
 }

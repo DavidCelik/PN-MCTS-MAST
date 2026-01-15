@@ -12,13 +12,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
-public class PNSMCTS_L2 extends AI {
+public class PNSMCTS_RAVE extends AI {
 
 
-    public static boolean FIN_MOVE_SEL = true;
+    public static boolean FIN_MOVE_SEL = false;
     public static int SOLVERLIKE_MINVISITS = Integer.MAX_VALUE; // 5; // Integer.MAX_VALUE;
-    public static int counter = 0;
-    public static double CONTEMPT_FACTOR = -100; // -0.1; 0.0; 0.1; 0.2; ... ?
+
 
     //-------------------------------------------------------------------------
 
@@ -30,7 +29,8 @@ public class PNSMCTS_L2 extends AI {
     /**
      * Settings contain (in order): pnConstant, explorationConstant, time per turn
      */
-    private static double[] settings;
+    private static double[] settings; // PN-Constant, MCTS-Constant, Time per turn
+
 
     // Used to count simulations per second
     private static double sims = 0;
@@ -39,40 +39,26 @@ public class PNSMCTS_L2 extends AI {
 
     //-------------------------------------------------------------------------
 
-    //-----------david---------------------------
-    /**
-     * @return The number of simulations performed in the current turn
-     */
-    public double getSimsThisTurn() {
-        return simsThisTurn;
-    }
-    //-----------david---------------------------
     /**
      * Constructor
      */
-    public PNSMCTS_L2() {
-        this.friendlyName = "PNS_L2 UCT";
+    public PNSMCTS_RAVE() {
+        this.friendlyName = "PNS_RAVE UCT";
         double[] defaultSettings = {1.0, Math.sqrt(2), 1.0}; // PN-Constant, MCTS-Constant, Time per turn
         this.settings = defaultSettings;
     }
 
-    public PNSMCTS_L2(double[] settings) {
-        this.friendlyName = "PNS_L2 UCT";
-        this.settings = settings;
-    }
-
-    public PNSMCTS_L2(boolean finMove, int minVisits, double pnCons, double contemptFactor) {
+    public PNSMCTS_RAVE(boolean finMove, int minVisits, double pnCons) {
         this.FIN_MOVE_SEL = finMove;
         this.SOLVERLIKE_MINVISITS = minVisits;
-        this.CONTEMPT_FACTOR = contemptFactor; // applies only if FIN_MOVE_SEL is true
-        this.friendlyName = "PNS_L2 UCT";
+        this.friendlyName = "PNS_RAVE UCT";
         double[] defaultSettings = {pnCons, Math.sqrt(2), 1.0}; // PN-Constant, MCTS-Constant, Time per turn
         this.settings = defaultSettings;
-        this.counter = 0;
     }
 
-    public void resetCounter() {
-        counter = 0;
+    public PNSMCTS_RAVE(double[] settings) {
+        this.friendlyName = "PNS_RAVE UCT";
+        this.settings = settings;
     }
 
 
@@ -125,19 +111,37 @@ public class PNSMCTS_L2 extends AI {
 
             Context contextEnd = current.context;
 
+            // Store the simulation moves
+            FastArrayList<Move> movesInSimulation = new FastArrayList<>();
+
             if (!contextEnd.trial().over()) {
                 // Run a playout if we don't already have a terminal game state in node
                 contextEnd = new Context(contextEnd);
-                game.playout
-                        (
-                                contextEnd,
-                                null,
-                                -1.0,
-                                null,
-                                0,
-                                -1,
-                                ThreadLocalRandom.current()
-                        );
+//                game.playout
+//                        (
+//                                contextEnd,
+//                                null,
+//                                -1.0,
+//                                null,
+//                                0,
+//                                -1,
+//                                ThreadLocalRandom.current()
+//                        );
+
+                // Run the playout and track moves
+                while (!contextEnd.trial().over()) {
+                    FastArrayList<Move> legalMoves = contextEnd.game().moves(contextEnd).moves();
+                    if (legalMoves.isEmpty()) {
+                        // Handle case with no legal moves
+                        Move defaultMove = contextEnd.game().moves(contextEnd).moves().get(0);
+                        contextEnd.game().apply(contextEnd, defaultMove);
+                    } else {
+                        // Select a random move
+                        Move move = legalMoves.get(ThreadLocalRandom.current().nextInt(legalMoves.size()));
+                        movesInSimulation.add(move);  // Track the move
+                        contextEnd.game().apply(contextEnd, move);
+                    }
+                }
                 sims++;
                 simsThisTurn++;
             }
@@ -169,12 +173,12 @@ public class PNSMCTS_L2 extends AI {
             }
             // if proofNum of root changed -> check is proven or disproven
             // if (changed) {
-                // for (Node child : root.children) {
-                    // if root is proven -> stop searching
-                    // if (child.proofNum == 0) { // causes problems with robust child final move selection
-                    //     return finalMoveSelection(root);
-                    // }
-                // }
+            //     for (Node child : root.children) {
+            // if root is proven -> stop searching
+            // if (child.proofNum == 0) { // causes problems with robust child final move selection
+            //     return finalMoveSelection(root);
+            // }
+            // }
             // }
 
             // Increment iteration count
@@ -205,7 +209,7 @@ public class PNSMCTS_L2 extends AI {
         }
 
         // use UCT-PN equation to select from all children, with random tie-breaking
-        Node bestChild = null;
+        Node bestChild = null; //current.children.get(0); //null;
         double bestValue = Double.NEGATIVE_INFINITY;
         int numBestFound = 0;
 
@@ -220,21 +224,9 @@ public class PNSMCTS_L2 extends AI {
         for (int i = 0; i < numChildren; ++i) {
             final Node child = current.children.get(i);
 
-            // sanity check
-//            if (child.proofNum == 0 && child.proofNumL2 != 0) System.err.println("L1 proof 0 but L2 not!!!");
-//            if (child.disproofNumL2 == 0 && child.disproofNum != 0) System.err.println("L2 disproof 0 but L1 not!!!");
-
-
-            // original solver
-//            if (current.proofNum != 0 && current.disproofNum != 0) {
-//                if (child.proofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue;
-//                if (child.disproofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue;
-//            }
-
-            // slightly modified 2Level solver
-            if (current.proofNumL2 != 0 && current.disproofNum != 0) {
-                if (child.proofNumL2 == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue; // win or draw
-                if (child.disproofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue; // lose or draw
+            if (current.proofNum != 0 && current.disproofNum != 0) {
+                if (child.proofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue;
+                if (child.disproofNum == 0 && child.visitCount > SOLVERLIKE_MINVISITS) continue;
             }
 
             final double exploit = child.scoreSums[mover] / child.visitCount;
@@ -253,6 +245,8 @@ public class PNSMCTS_L2 extends AI {
                 bestChild = child;
             }
         }
+
+        //if (bestChild==null) System.out.println("YYYY");
         return bestChild;
     }
 
@@ -295,22 +289,7 @@ public class PNSMCTS_L2 extends AI {
                         break;
                     }
                 }
-            } else if (rootNode.proofNumL2 == 0) { // Level 2 check
-                double rootscore = rootNode.scoreSums[rootNode.context.state().mover()] / rootNode.visitCount;
-                //System.out.println("Can prove draw (not win), root score " + rootscore);
-                if (rootscore <= CONTEMPT_FACTOR) {
-                    ++counter;
-                    // uncomment line below for verbose!
-                    //System.out.println("FinMoveSel proven DRAW, rootscore: " + rootscore);
-                    for (Node child : rootNode.children) {
-                        if (child.proofNumL2 == 0) {
-                            bestChild = child;
-                            break;
-                        }
-                    }
-                }
             }
-            //System.out.println("rootscore: " + rootNode.scoreSums[rootNode.context.state().mover()] / rootNode.visitCount);
         }
 
         return bestChild.moveFromParent;
@@ -391,15 +370,6 @@ public class PNSMCTS_L2 extends AI {
         private double disproofNum;
 
         /**
-         * Proof and Disproof number Level 2
-         */
-        private double proofNumL2;
-        private double disproofNumL2;
-
-        // tutaj dodać i w 393: public void evaluate() dodać obsługę nowych z różnicą zachowania w przypadku remisu >= 0.5 zamiast == 1.0
-        // zmienić compareTo(Node), zmienić to w: PNSMCTS_Extension2
-
-        /**
          * Rank of a node compared to "siblings". Needed for UCT-PN. Ranks ordered best to worst
          */
         private int rank;
@@ -438,11 +408,6 @@ public class PNSMCTS_L2 extends AI {
              * A disproven node
              */
             FALSE,
-
-            /**
-             * A disproven node
-             */
-            DRAW,
 
             /**
              * Unknown node (yet to prove or disprove)
@@ -489,8 +454,6 @@ public class PNSMCTS_L2 extends AI {
             if (this.context.trial().over()) {
                 if (RankUtils.utilities(this.context)[proofPlayer] == 1.0) {
                     this.value = PNSNodeValues.TRUE;
-                } else if (RankUtils.utilities(this.context)[proofPlayer] >= 0.0) {
-                    this.value = PNSNodeValues.DRAW;
                 } else {
                     this.value = PNSNodeValues.FALSE;
                 }
@@ -511,56 +474,40 @@ public class PNSMCTS_L2 extends AI {
             if (this.expanded) {
                 if (this.type == PNSNodeTypes.AND_NODE) {
                     double proof = 0;
-                    double proofL2 = 0;
                     for (int i = 0; i < this.children.size(); i++) {
                         proof += this.children.get(i).getProofNum();
-                        proofL2 += this.children.get(i).getProofNumL2();
                     }
                     double disproof = Double.POSITIVE_INFINITY;
-                    double disproofL2 = Double.POSITIVE_INFINITY;
                     for (int i = 0; i < this.children.size(); i++) {
                         if (this.children.get(i).getDisproofNum() < disproof) {
                             disproof = this.children.get(i).getDisproofNum();
                         }
-                        if (this.children.get(i).getDisproofNumL2() < disproofL2) {
-                            disproofL2 = this.children.get(i).getDisproofNumL2();
-                        }
                     }
                     //If nothing changed return false
-                    if (this.proofNum == proof && this.proofNumL2 == proofL2 && this.disproofNum == disproof && this.disproofNumL2 == disproofL2) {
+                    if (this.proofNum == proof && this.disproofNum == disproof) {
                         return false;
                     } else {
                         this.proofNum = proof;
                         this.disproofNum = disproof;
-                        this.proofNumL2 = proofL2;
-                        this.disproofNumL2 = disproofL2;
                         return true;
                     }
                 } else if (this.type == PNSNodeTypes.OR_NODE) {
                     double disproof = 0;
-                    double disproofL2 = 0;
                     for (int i = 0; i < this.children.size(); i++) {
                         disproof += this.children.get(i).getDisproofNum();
-                        disproofL2 += this.children.get(i).getDisproofNumL2();
                     }
                     double proof = Double.POSITIVE_INFINITY;
-                    double proofL2 = Double.POSITIVE_INFINITY;
                     for (int i = 0; i < this.children.size(); i++) {
                         if (this.children.get(i).getProofNum() < proof) {
                             proof = this.children.get(i).getProofNum();
                         }
-                        if (this.children.get(i).getProofNumL2() < proofL2) {
-                            proofL2 = this.children.get(i).getProofNumL2();
-                        }
                     }
                     //If nothing changed return false
-                    if (this.proofNum == proof && this.proofNumL2 == proofL2 && this.disproofNum == disproof && this.disproofNumL2 == disproofL2) {
+                    if (this.proofNum == proof && this.disproofNum == disproof) {
                         return false;
                     } else {
                         this.proofNum = proof;
                         this.disproofNum = disproof;
-                        this.proofNumL2 = proofL2;
-                        this.disproofNumL2 = disproofL2;
                         return true;
                     }
                 }
@@ -569,23 +516,12 @@ public class PNSMCTS_L2 extends AI {
                 if (this.value == PNSNodeValues.FALSE) {
                     this.proofNum = Double.POSITIVE_INFINITY;
                     this.disproofNum = 0;
-                    this.proofNumL2 = Double.POSITIVE_INFINITY;
-                    this.disproofNumL2 = 0;
-                } else if (this.value == PNSNodeValues.DRAW) {
-                    this.proofNum = Double.POSITIVE_INFINITY;
-                    this.disproofNum = 0;
-                    this.proofNumL2 = 0;
-                    this.disproofNumL2 = Double.POSITIVE_INFINITY;
                 } else if (this.value == PNSNodeValues.TRUE) {
                     this.proofNum = 0;
                     this.disproofNum = Double.POSITIVE_INFINITY;
-                    this.proofNumL2 = 0;
-                    this.disproofNumL2 = Double.POSITIVE_INFINITY;
                 } else if (this.value == PNSNodeValues.UNKNOWN) {
                     this.proofNum = 1;
                     this.disproofNum = 1;
-                    this.proofNumL2 = 1;
-                    this.disproofNumL2 = 1;
                 }
             }
             //If we haven't expanded yet it will definitely be changed so return true
@@ -646,16 +582,8 @@ public class PNSMCTS_L2 extends AI {
             return proofNum;
         }
 
-        public double getProofNumL2() {
-            return proofNumL2;
-        }
-
         public double getDisproofNum() {
             return disproofNum;
-        }
-
-        public double getDisproofNumL2() {
-            return disproofNumL2;
         }
 
         public PNSNodeTypes getType() {
@@ -682,10 +610,6 @@ public class PNSMCTS_L2 extends AI {
                     return -1;
                 } else if (this.getProofNum() > o.getProofNum()) {
                     return 1;
-                } else if (this.getProofNumL2() < o.getProofNumL2()) {
-                    return -1;
-                } else if (this.getProofNumL2() > o.getProofNumL2()) {
-                    return 1;
                 } else {
                     return 0;
                 }
@@ -693,10 +617,6 @@ public class PNSMCTS_L2 extends AI {
                 if (this.getDisproofNum() < o.getDisproofNum()) {
                     return -1;
                 } else if (this.getDisproofNum() > o.getDisproofNum()) {
-                    return 1;
-                } else if (this.getDisproofNumL2() < o.getDisproofNumL2()) {
-                    return -1;
-                } else if (this.getDisproofNumL2() > o.getDisproofNumL2()) {
                     return 1;
                 } else {
                     return 0;
